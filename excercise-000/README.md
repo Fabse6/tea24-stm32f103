@@ -337,6 +337,7 @@ file $ELF
 ```
 
 **Frage 1.1:** Was meldet `file` über die Architektur (ARM? 32 Bit?) Warum kann man die Datei nicht auf dem PC ausführen?
+--> Weil es eine 32-bit ARM executable ist und nicht wie der pc x64 oder x86 ist
 
 ### 1.2 Segmentgrößen und Symbole ansehen
 
@@ -367,8 +368,11 @@ Was bedeuten die Spalten bei `objdump -h`?
 | `LMA` | *Load Memory Address*: Wo liegt der Abschnitt **im Flash-Abbild**? |
 
 **Frage 1.2a:** Suchen Sie in der Ausgabe von `size`/`objdump -h` nach einem Abschnitt `.rodata`. Gibt es ihn? (Tipp: Er fehlt – lesen Sie im Linker-Script `ld/stm32f103rb.ld` nach, in welchen Abschnitt `*(.rodata*)` einsortiert wird. Dem gehen wir in Teil 4.3 nach.)
+--> Es gibt ihn nicht, da er in .text einsortiert wird
 
 **Frage 1.2b:** Bei welchem Abschnitt sind VMA und LMA **verschieden**? Warum ist das genau bei diesem Abschnitt so? (Tipp: Was muss der Startup-Code mit ihm tun?)
+--> bei .data ; Grund: Da ein Mikrocontroller seine initialisierten globalen und statischen Variablen (z. B. int counter = 42;) nicht direkt im Flash ändern kann und den Startwert im SRAM nach einem Reset sonst verlieren würde, trennt der Linker Ladeadresse und Ausführungsadresse.
+
 
 ### 1.3 Die Vektortabelle
 
@@ -389,9 +393,14 @@ arm-none-eabi-objdump -s -j .isr_vector $ELF | head
 Im Quelltext (`src/startup_stm32f103rb.c`) ist die Tabelle das Array `interrupt_vector`, das mit `__attribute__((section(".isr_vector")))` in diesen Abschnitt gelegt wird. Die Ausgabe zeigt Bytes in Hex. Der Cortex-M ist **Little Endian**: Das niederwertigste Byte steht zuerst. Beispiel: Die Bytes `00 50 00 20` ergeben den Wert `0x20005000`.
 
 **Aufgabe:** Lesen Sie Wort 0 und Wort 1 aus der Ausgabe ab und schreiben Sie die Werte (in der korrekten Byte-Reihenfolge) auf.
+--> 1. Wort: 00 50 00 20 --> 0x20005000 --> 00100000 00000000 01010000 00000000
+--> 2. Wort: 1d 06 00 08 --> 0x0800061d --> 00001000 00000000 00000110 00011011
+
 
 **Frage 1.3:**
 - Wo im RAM liegt der Stack-Start (Wort 0)? Passt das zum Ende des RAMs (`0x2000_0000` + 20 KiB, siehe Linker-Script)?
+  --> Stack-Start ist das Erste Wort --> 0x20005000
+  --> mit 20KiB -> 20*1024=20480B = 0x5000 -->passt zum  Ende des RAMs
 - Wort 1 hat ein **ungerades** letztes Bit (z. B. `...A5`). Das ist kein Fehler: Das Bit 0 bedeutet „Thumb-Modus" (der Cortex-M kennt nur diesen). Die echte Adresse ist der Wert **minus 1**.
 
 ---
@@ -474,6 +483,7 @@ sysbus.cpu SP
 | `quit` | Beendet Renode. |
 
 **Frage 2.1:** Welchen Wert haben PC und SP direkt nach dem Start? (Erwartung für SP: `0x20005000`, das Ende des RAMs.) Vergleichen Sie mit Wort 0 und Wort 1 der Vektortabelle aus Teil 1.3. Was fällt auf? (Tipp: Thumb-Bit!)
+--> SP hat den Wert des Stackstarts, PC ist 0x800061c und somit 1 kleiner als Wort 1 der Vektortabelle, da das Wort1 in der Vektortabelle immer das Thumb-Bit als letztes Bit hat und der reale Wert des Wort 1 immer minus 1 ist
 
 ### 2.4 Die UART-Ausgabe sichtbar machen (optional – für diese Aufgabe nicht nötig)
 
@@ -559,7 +569,8 @@ Der Befehl `x` ist das Schweizer Taschenmesser zum Speicherlesen. Seine Form ist
 
 Beispiele: `x/16xb &g_bss_buffer` (16 Bytes hex), `x/4i $pc` (nächste 4 Instruktionen), `x/s kRodataBanner` (Text).
 
-**Frage 3.1:** Stimmen `sp` und `pc` mit den Werten aus der Vektortabelle überein? Warum steht in `pc` die Adresse *ohne* gesetztes Thumb-Bit?
+**Frage 3.1:** Stimmen `sp` und `pc` mit den Werten aus der Vektortabelle überein? Warum steht in `pc` die Adresse *ohne* gesetztes Thumb-Bit? 
+--> Stimmen überein. Wenn der Prozessor beim Reset den Reset-Vektor in den Program Counter (pc) lädt, maskiert die Hardware Bit 0 automatisch aus (Adresse & ~1, also Wert minus 1), damit pc auf die tatsächliche Byte-Adresse der ersten Instruktion zeigt.
 
 ### 3.3 Breakpoints und Ablaufsteuerung
 
@@ -674,6 +685,13 @@ Mit `monitor` schickt GDB einen Befehl **an den Monitor von Renode** weiter, ohn
 Renode läuft weiter. Sie können sich mit `target remote localhost:3333` erneut verbinden. Zum vollständigen Beenden wechseln Sie in Terminal 1 und tippen `quit`.
 
 **Aufgabe 3:** Setzen Sie einen Breakpoint auf `main`, lassen Sie das Programm laufen (`continue`) und führen Sie mit `next` einige Zeilen aus. Lesen Sie mit `print` mindestens zwei Variablen aus. Optional (nur wenn Sie Teil 2.4 gemacht haben): Welche Meldungen erscheinen in `/tmp/usart2.log`?
+--> Meldungen in usart2.log: ...tick data=0x12345CB2 bss=1594
+tick data=0x12345CB3 bss=1595
+tick data=0x12345CB4 bss=1596
+tick data=0x12345CB5 bss=1597
+tick data=0x12345CB6 bss=1598
+tick data=0x12345CB7 bss=1599
+tick data=0x12345CB8 bss=1600...
 
 ---
 
@@ -710,11 +728,11 @@ Erstellen Sie diese Tabelle (in Ihrer Abgabe) und füllen Sie sie mit den echten
 
 | Variable | Adresse | Flash oder RAM? | Segment |
 |---|---|---|---|
-| `g_data_counter` | | | |
-| `g_bss_counter` | | | |
-| `g_bss_buffer` | | | |
-| String aus `kRodataBanner` | | | (Abschnitt laut GDB: ____ ) |
-| Funktion `main` | | | |
+| `g_data_counter` | 0x2000000| RAM|.data |
+| `g_bss_counter` | 0x20000174|RAM | .bss|
+| `g_bss_buffer` |0x20000178 | RAM| .bss|
+| String aus `kRodataBanner` |isn`t an lvalue | Flash| (Abschnitt laut GDB: constant(.rodata) ) |
+| Funktion `main` | 0x8000570| Flash | .text|
 | lokale Variable `stack_probe` in `print_memory_layout()` | | | (siehe Teil 6) |
 | statische Variable `current_heap_end` in `_sbrk()` | | | (siehe Teil 7) |
 
@@ -723,6 +741,8 @@ Die Firmware gibt dieselben Adressen auch per UART aus (`print_memory_layout()` 
 **Frage 4.1:** An welcher Adresse beginnt `.data`, und wo endet `.bss`? (Tipp: Die Linker-Symbole stehen in `nm`; siehe Teil 5.2.)
 
 **Frage 4.2:** Warum haben `.data` und `.bss` Adressen im RAM, konstante Daten und Code aber Adressen im Flash?
+--> RAM: da initialisierte und uninitialisierte Variablen schnell beschrieben werden müssen
+--> Flash: da Funktionen oder Konstanten nur lesbar sein müssen und normalerweise während Laufzeit nicht umgeschrieben werden
 
 ### 4.3 Wo ist `.rodata` geblieben?
 
@@ -738,8 +758,13 @@ arm-none-eabi-size --format=sysv <gefundene Datei>
 **Fragen:**
 
 - **4.3a** Welche Abschnitte hat die Objektdatei (`.text`, `.rodata...`, `.data`, `.bss`)? Wo ist Ihr Banner-Text?
+  --> .text, .data, .bss, .rodata --> Banner Text müsste in .rodata sein
+
 - **4.3b** Warum ist es für die Hardware egal, ob `.rodata` einen eigenen Abschnitt hat oder in `.text` steckt? (Beides liegt im Flash und wird nie verändert.)
+  --> Beide stecken auf dem gleichen Physischen Speicher (Flash); Daten und Code-Zugriffe laufen über die Speicherbusse auf den selben physischen Flash-Speicher
+
 - **4.3c** Warum kann man trotzdem wünschen, `.rodata` getrennt zu haben? (Tipp: übersichtliche Größenstatistik, unterschiedliche Speicherbereiche, Speicherschutz.) Siehe Bonus 6.
+  --> man sieht sofort wieviel Speicherplatz Code (.text) und wieviel Konstanten (.rodata) benötigen; man könnte sie selbst auf genaue Adressen legen; Mit getrennten Abschnitten kann man Bereiche beispielsweise nur lesbar machen oder nur ausführbar oder eben gezielt nicht ausführbar, damit CPU-Sprünge in Datensektionen blockiert werden -->Speicherschutz
 
 ---
 
@@ -798,16 +823,33 @@ In diesem Projekt heißen sie (siehe `ld/stm32f103rb.ld` und `src/startup_stm32f
 ```
 
 **Aufgabe 5.2:** Berechnen Sie mit diesen Werten die Größe von `.data` und `.bss` in Bytes. Vergleichen Sie mit der Ausgabe von `arm-none-eabi-size --format=sysv $ELF`.
-
+--> Größe(.data) = _edata - _sdata = 0x20000158 - 0x20000000 = 0x0158 = 344B
+--> Größe(.bss) = _ebss - _sbss = 0x20000470 - 0x2000158 = 1136 -  344 = 792B
 ### 5.3 Den Reset-Handler im Quelltext und in Maschinencode lesen
 
 Öffnen Sie `src/startup_stm32f103rb.c` und lesen Sie `Reset_Handler`. Beantworten Sie:
 
 - Welche zwei `while`-Schleifen enthält die Funktion, und welche Linker-Symbole benutzen sie? Was kopiert die erste, was füllt die zweite?
+  --> while (dst < &_edata) ; while (dst < &_ebss)
+
 - Warum werden `uint32_t *` (Wörter) und nicht Bytes kopiert? Was garantiert das `. = ALIGN(4);` im Linker-Script dafür?
+  -->Auf einem 32-Bit-ARM-Cortex-M liest und schreibt der Bus im Idealfall ganze 32-Bit-Wörter (4 Bytes) pro Zugriff. Mit uint32_t * werden 4 Bytes pro Schleifendurchlauf bewegt bzw. genullt – das ist deutlich schneller und erzeugt kompakteren Code als Byte-für-Byte-Schleifen.
+
 - Was ruft `__libc_init_array()` auf, und warum steht dieser Aufruf **nach** dem Kopieren/Nullen?
+  --> __libc_init_array() stammt aus der C-/C++-Laufzeitbibliothek (z. B. newlib) und ruft Funktionen aus den Initialisierungs-Arrays (wie .preinit_array und .init_array) auf.
+  -->Weil diese Initialisierungsfunktionen und Konstruktoren selbst schon globale/statische Variablen (.data und .bss) lesen oder setzen können. Würde __libc_init_array() vorher laufen, könnten frisch initialisierte Variablen im nächsten Schritt durch das Kopieren von .data überschrieben oder durch das Nullen von .bss gelöscht werden.
+
+
 - Was passiert, wenn `main` zurückkehrt?
+  --> Aufzählungszeichen Kehrt der Ablauf in den Startup-Code zurück (hinter den Aufruf von main()).
+Aufzählungszeichen Dort steht in der Regel eine Endlosschleife (z. B. while (1) {} oder for (;;) {} / __BKPT(0)), damit der Prozessor nicht einfach in uninitialisierten Speicher oder Zufallsdaten weiterläuft. (In vielen Embedded-Projekten ist main() deshalb ohnehin als Endlosschleife ausgelegt.)
+
 - Was ist `Default_Handler`, und was haben all die `*_IRQHandler` mit ihm zu tun (`weak`, `alias`)? Was passiert, wenn ein Interrupt auftritt, für den es keinen eigenen Handler gibt?
+   --> Aufzählungszeichen Was ist Default_Handler?
+Es ist ein Standard-Interrupt-Handler (oft eine Endlosschleife wie Infinite_Loop: b Infinite_Loop oder while(1){}), der als Auffangnetz für Interrupts/Exceptions dient, für die du keinen eigenen Handler geschrieben hast.
+--> alias("Default_Handler") sorgt dafür, dass der Symbolname eines Interrupt-Handlers (z. B. TIM2_IRQHandler oder USART1_IRQHandler) in der Vektortabelle auf dieselbe Adresse wie Default_Handler zeigt.
+--> weak macht dieses Symbol schwach (überschreibbar): Schreibst du in deinem Code eine eigene Funktion mit genau demselben Namen (z. B. void TIM2_IRQHandler(void)), überschreibt deine starke Definition beim Linken automatisch den weak-Alias, und die Vektortabelle zeigt auf deine Funktion.
+--> Die CPU springt über die Vektortabelle zum Default_Handler und bleibt dort in der Regel in einer Endlosschleife hängen (sofern der Interrupt im NVIC überhaupt aktiviert und ausgelöst wurde). Das ist beim Debuggen hilfreich, weil du im Debugger sofort siehst, dass ein unerwarteter Interrupt ausgelöst wurde – und falls du nicht sauber abfängst, steht die Firmware dort fest.
 
 Dann in GDB:
 
@@ -897,8 +939,9 @@ Wir halten die CPU **ganz am Anfang** an – bevor der Startup-Code seine Arbeit
 - **5.1** Welchen Wert hatte `g_data_counter` direkt nach dem Reset und welchen bei `main`? Woher stammt der Startwert `0x12345678`?
 - **5.2** Welchen Wert hat `g_bss_counter` jetzt, obwohl Sie `0xDEADBEEF` hineingeschrieben haben? Wer hat ihn genullt?
 - **5.3** In welcher Funktion hielt der Watchpoint an? Passt das zu Ihrer Erwartung? Welcher Quelltextzeile in `Reset_Handler` entspricht das?
-- **5.4** Wie viele Wörter kopiert die erste Schleife (siehe Teil 5.2: `_edata - _sdata`)? Warum ist das so wenig?
+- **5.4** Wie viele Wörter kopiert die erste Schleife (siehe Teil 5.2: `_edata - _sdata`)? Warum ist das so wenig? --> ich glaube 11
 - **5.5** Welche der in `startup_stm32f103rb.c` vorbereiteten Handler überschreibt `main.cpp` mit einer eigenen Funktion? (Tipp: Suchen Sie `extern "C"` in `main.cpp`.)
+  --> void SysTick_Handler
 
 ---
 
@@ -1012,6 +1055,8 @@ Tragen Sie die Werte in diese Tabelle ein:
 **Fragen:**
 
 - **6.1** Werden die Adressen mit jeder Ebene **größer oder kleiner**? Was sagt das über die Wachstumsrichtung des Stacks?
+  --> wird kleiner also Wächst der Stack nach oben (von großen zu kleinen Adressen)
+
 - **6.2** Wie groß ist ein Stack-Frame von `stackDemo` (die Differenz)? Ist der Wert durch 8 teilbar? (Hintergrund: Die ARM-Aufrufkonvention verlangt an Funktionsgrenzen einen auf **8 Byte ausgerichteten** Stack.)
 - **6.3** Wie viele Bytes Stack verbrauchen sechs Rekursionsebenen? Wie viele Ebenen würden in die 2 KiB passen, die das Linker-Script mit `_Min_Stack_Size` für den Stack reserviert?
 
@@ -1104,9 +1149,11 @@ Der Stack beginnt bei `_stack_top`. Wie viel ist schon belegt, wenn Sie in `main
 
 **Fragen:**
 
-- **6.5** Was ist passiert? In welche Bereiche ist der Stack hineingewachsen (Heap? `.bss`? `.data`)?
+- **6.5** Was ist passiert? In welche Bereiche ist der Stack hineingewachsen (Heap? `.bss`? `.data`)? --> als Erstes Heap --> wenn er ungestoppt weiter wächst auch in .data und .bss
 - **6.6** Warum bekommt man auf dem Mikrocontroller keine Fehlermeldung wie „Segmentation fault"?
+- --> Segmentation fault wird durch Betriebssystem ausgelöst aber Mikrocomputer hat kein Betriebssystem
 - **6.7** Nennen Sie drei Möglichkeiten, Stack Overflows zu vermeiden oder früh zu erkennen (z. B. Rekursion vermeiden, Stack-Größe im Linker-Script mit `_Min_Stack_Size` festlegen, Stack-Painting, Memory Protection Unit).
+- --> Rekursion vermeiden und große lokale Puffer einschränken; Stack Painting (Stack von vorne rein mit Muster füllen und im Debugger schaune wie weit rangeschritten es nach einem, zwei ... läufen ist);
 
 Stellen Sie danach den Wert in `main()` wieder auf `5` zurück.
 
