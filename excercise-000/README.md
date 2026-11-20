@@ -1149,11 +1149,14 @@ Der Stack beginnt bei `_stack_top`. Wie viel ist schon belegt, wenn Sie in `main
 
 **Fragen:**
 
-- **6.5** Was ist passiert? In welche Bereiche ist der Stack hineingewachsen (Heap? `.bss`? `.data`)? --> als Erstes Heap --> wenn er ungestoppt weiter wächst auch in .data und .bss
+- **6.5** Was ist passiert? In welche Bereiche ist der Stack hineingewachsen (Heap? `.bss`? `.data`)?
+   --> als Erstes Heap --> wenn er ungestoppt weiter wächst auch in .data und .bss
+  
 - **6.6** Warum bekommt man auf dem Mikrocontroller keine Fehlermeldung wie „Segmentation fault"?
-- --> Segmentation fault wird durch Betriebssystem ausgelöst aber Mikrocomputer hat kein Betriebssystem
+  --> Segmentation fault wird durch Betriebssystem ausgelöst aber Mikrocomputer hat kein Betriebssystem
+  
 - **6.7** Nennen Sie drei Möglichkeiten, Stack Overflows zu vermeiden oder früh zu erkennen (z. B. Rekursion vermeiden, Stack-Größe im Linker-Script mit `_Min_Stack_Size` festlegen, Stack-Painting, Memory Protection Unit).
-- --> Rekursion vermeiden und große lokale Puffer einschränken; Stack Painting (Stack von vorne rein mit Muster füllen und im Debugger schaune wie weit rangeschritten es nach einem, zwei ... läufen ist);
+  --> Rekursion vermeiden und große lokale Puffer einschränken; Stack Painting (Stack von vorne rein mit Muster füllen und im Debugger schaune wie weit rangeschritten es nach einem, zwei ... läufen ist);
 
 Stellen Sie danach den Wert in `main()` wieder auf `5` zurück.
 
@@ -1166,8 +1169,13 @@ Stellen Sie danach den Wert in `main()` wieder auf `5` zurück.
 `heap_demo()` in `main.cpp` ruft direkt `_sbrk(64)` auf. Lesen Sie `src/syscalls.c` und beantworten Sie vorab:
 
 - Was gibt `_sbrk` beim allerersten Aufruf zurück?
+  --> gibt die vorherige Heap-Adresse zurück (previous_heap_end)
+
 - In welchen Fällen gibt `_sbrk` `(void*)-1` zurück?
+  --> Wenn inkrement kleiner als 0 ist oder die neue Heap-Adresse größer als heap_end ist
+
 - Wo liegt die Variable `current_heap_end` – im Stack, im Heap, in `.data` oder in `.bss`? (Tipp: letzte Aufgabe, `static` in einer Funktion, und der Startwert `0`.)
+  --> müsste im .bss sein
 
 ### 7.2 `_sbrk` im Debugger beobachten
 
@@ -1194,10 +1202,15 @@ Stellen Sie danach den Wert in `main()` wieder auf `5` zurück.
 **Fragen:**
 
 - **7.1** Welcher Wert kommt von `_sbrk` zurück? Vergleichen Sie mit `&_heap_start`.
+  --> Beide geben 0x20000490 zurück
 - **7.2** Um wie viel Bytes ist `current_heap_end` danach gewachsen?
+  --> 64 Byte
 - **7.3** Wie viel Heap steht insgesamt zur Verfügung (`_heap_end - _heap_start`)? (Kontrolle: `_heap_end` muss `0x20004800` sein. Die Firmware gibt diese Zahl auch als „heap capacity bytes" per UART aus.)
+  -->0x20004800 - 0x20000490 = 0x4370 = 17.264 Bytes
 - **7.4** In welchem Segment liegt `current_heap_end`? Belegen Sie es mit `info address current_heap_end` oder `nm -C`.
+  --> IM SRAM in .data (wahrscheinlich kann es wegen No symbol in current context nicht belegen)
 - **7.5** Der Heap wächst nach **oben**, der Stack nach **unten**. Was passiert, wenn sie sich treffen? Wie versucht `_sbrk` das zu verhindern (Vergleich mit `_heap_end`)? Beachten Sie: Der Stack selbst wird von `_sbrk` **nicht** gebremst!
+  --> _sbrk prüft vor erhöhen auf _heap_end (Obergrenze des Heaps) und lehnt abfragen ab, sobald Limit überschritten wurde. Stack-Wachstum kann _sbrk nicht einschränken
 
 **Experiment: Heap-Erschöpfung.** Starten Sie neu (Renode `quit`, neu starten; GDB neu verbinden) und halten Sie wieder in `_sbrk` an:
 
@@ -1228,16 +1241,17 @@ g_heap_ptr = std::malloc(32);
 ```
 
 Setzen Sie wieder `break _sbrk` und schauen Sie mit `bt`, **wer** jetzt aufruft. Fordert `malloc` genau 32 Bytes an – oder mehr? Warum fragt `malloc` die Hardware vermutlich in größeren Blöcken, als Sie wollten? Liegt `g_heap_ptr` im Heap, oder liegt nur der Zeiger *darauf* in `.bss`?
+--> Nach dem Setzen von break _sbrk und continue zeigt bt (backtrace), dass nun malloc (bzw. _malloc_r aus der C-Laufzeitbibliothek wie newlib/newlib-nano) _sbrk aufruft statt des direkten _sbrk(64)-Aufrufs aus heap_demo. malloc fordert in der Regel mehr als genau 32 Bytes an (z. B. rund 1 KiB bzw. einen größeren Chunk/Block), weil der Allocator sich Speicher vom OS/Syscall (_sbrk) in größeren Chunks holt, um nicht bei jedem kleinen malloc einen Syscall auszulösen, eigene Verwaltungs-/Metadaten (Chunk-Header/Alignment) unterzubringen und Fragmentierung zu reduzieren – und intern dann kleinere Anfragen wie 32 Bytes aus diesem Pool bedient. g_heap_ptr selbst liegt nicht im Heap, sondern nur der Zeiger (die Variable g_heap_ptr, z. B. in .bss bzw. .data je nach Initialisierung) liegt im statischen RAM-Bereich und speichert lediglich die Speicheradresse des Blocks, der im Heap liegt.
 
 ### 7.4 Unterschied Stack und Heap – Tabelle ausfüllen
 
 | Eigenschaft | Stack | Heap |
 |---|---|---|
-| Wer verwaltet den Speicher? | | |
-| Wachstumsrichtung auf diesem Chip | | |
-| Wann wird Speicher belegt? | | |
-| Wann wird er freigegeben? | | |
-| Typisches Risiko | | |
+| Wer verwaltet den Speicher? | CPU automatisch über SP (Stack Pointer) | Der Allocator (z. B. malloc/free bzw. new/delete aus der C/C++-Laufzeitbibliothek) über _sbrk und current_heap_end |
+| Wachstumsrichtung auf diesem Chip |Nach unten (zu niedrigeren RAM-adressen) | nach oben (zu höheren RAM-Adressen) |
+| Wann wird Speicher belegt? | Automatisch bei Funktionsaufrufen, lokalen Variablen, gesicherten Registern und Interrupts (PUSH|Dynamisch zur Laufzeit bei expliziter Anforderung (z. B. malloc, calloc, new bzw. _sbrk(increment)) |
+| Wann wird er freigegeben? | beim Verlassen von Funktionen (POP)|explizit durch den Programmierer (delete/free) |
+| Typisches Risiko | Stack-Overflow| Out-of_Memory/Memory-Leaks |
 
 ---
 
@@ -1247,24 +1261,32 @@ Zeichnen Sie das RAM des STM32F103RB (Adressen `0x2000_0000` – `0x2000_4FFF`) 
 
 ```
 0x2000_5000  +----------------------------+  <- _stack_top (Start des Stacks)
-             |  Stack (wächst nach ____)  |
+             |  Stack (wächst nach unten)  |
              |             |              |
              |             v              |
              |  ~~~~ freier Platz ~~~~~~  |
              |             ^              |
              |             |              |
-             |  Heap (wächst nach ____)   |
-_heap_start  +----------------------------+  = ____________
+             |  Heap (wächst nach oben)   |
+_heap_start  +----------------------------+  = 0x20000490
              |  .noinit                   |
-_ebss        +----------------------------+  = ____________
+_ebss        +----------------------------+  = 0x20000470
              |  .bss                      |
-_sbss        +----------------------------+  = ____________
+_sbss        +----------------------------+  = 0x20000158
              |  .data                     |
 0x2000_0000  +----------------------------+
 ```
 
 Zeichnen Sie außerdem den **Flash** (Vektortabelle, `.text`, `.rodata`, Startwerte von `.data`) mit den Adressen aus `objdump -h`.
-
+```
+             +----------------------------+  =0x080000fec
+LMA .data    |  .data-Startwerte          |
+_ebss        +----------------------------+  = 0x08000e94
+             |  .text                    |
+_sbss        +----------------------------+  = 0x080000ec
+             |  .isr_vector                  |
+0x08000000  +----------------------------+
+```
 ---
 
 ## Abgabe / kurzes Fazit
@@ -1272,11 +1294,31 @@ Zeichnen Sie außerdem den **Flash** (Vektortabelle, `.text`, `.rodata`, Startwe
 Dokumentieren Sie in wenigen Sätzen:
 
 1. Wie arbeiten GDB und Renode zusammen? Was macht `target remote localhost:3333`?
+   --> Renode simuliert den Mikrocontroller (CPU, Flash, SRAM und Peripherie) und stellt über das GDB Remote Serial Protocol (RSP) einen Debug-Server auf einem TCP-Port bereit; GDB verbindet sich mit target remote localhost:3333 über localhost auf Port 3333 mit diesem Renode-GDB-Stub, um das laufende Ziel zu steuern, anzuhalten sowie Register, Speicher und Stack auszulesen.
+
 2. Was tut der Startup-Code, bevor `main` läuft? Warum ist das nötig?
+   --> Der Startup-Code stellt beim Reset den initialen Stack-Pointer bereit, führt den Reset_Handler aus, kopiert die Startwerte der .data-Sektion aus dem Flash (LMA) ins SRAM (VMA), nullt den .bss-Bereich im SRAM und ruft anschließend main() auf. Das ist nötig, weil der SRAM nach einem Reset unbestimmt ist, während .data-Initialwerte im Flash liegen und C/C++-Variablen beim Programmstart definierte Werte bzw. 0 besitzen müssen.
+
 3. Welche Ihrer Variablen liegen in `.data`, `.bss`, `.rodata`, auf dem Stack oder im Heap? (Tabelle aus Teil 4 und Teil 7.)
+   --> Aus den bisherigen Aufgaben wurden u. a. current_heap_end (im statischen RAM / .bss-Bereich) und g_heap_ptr (Zeigervariable selbst im statischen RAM wie .bss/.data, während der von ihr adressierte Speicherbereich im Heap liegt) sowie lokale Funktionsvariablen auf dem Stack und Konstanten/Strings im Flash (.rodata/.text) betrachtet;
+
 4. Wie ist ein Stack-Frame aufgebaut, und warum wächst der Stack bei diesem Prozessor nach unten?
+   --> Ein Stack-Frame umfasst typischerweise gesicherte Register, die Rücksprungadresse (LR), ggf. Frame-Pointer und lokale Variablen/Argumente, und der Stack wächst auf dem ARM Cortex-M zu niedrigeren Adressen (nach unten), weil PUSH den Stack-Pointer (SP) dekrementiert und so ein flexibler Adressraum zwischen oberem RAM-Ende (_estack) und nach oben wachsendem Heap genutzt werden kann.
+
 5. Was ist ein Stack Overflow, und warum bleibt er auf dem Mikrocontroller oft unbemerkt?
+   --> Ein Stack Overflow entsteht, wenn der Stack zu weit nach unten wächst und darunterliegende Speicherbereiche (wie Heap, .bss oder .data) überschreibt, was auf einem Mikrocontroller ohne Betriebssystem und MMU oft unbemerkt bleibt, weil kein OS mit „Segmentation fault“ eingreift und veränderte Variablen zunächst nur still verfälscht werden, bevor es später zu Fehlverhalten oder einem HardFault kommt.
+
 6. Erklären Sie jeweils in einem Satz die Befehle `break`, `continue`, `next`, `step`, `finish`, `x`, `print`, `info registers`, `bt`, `watch`.
+   --> break setzt an einer Funktion, Zeile oder Adresse einen Haltepunkt, an dem die Ausführung gestoppt wird.
+   --> continue lässt das angehaltene Programm bis zum nächsten Breakpoint, Watchpoint oder Halt weiterlaufen.
+   --> next führt die nächste Quellcodezeile aus und läuft über Funktionsaufrufe hinweg (step over).
+   --> step führt die nächste Quellcodezeile aus und steigt in aufgerufene Funktionen ein (step into).
+   --> finish führt die aktuelle Funktion bis zu ihrem Rücksprung aus und hält danach wieder an.
+   --> x liest und formatiert den rohen Speicherinhalt ab einer angegebenen Adresse (z. B. als Hex-Wörter oder Bytes).
+   --> print wertet Variablen, Ausdrücke oder Register aus und gibt ihren aktuellen Wert aus.
+   --> info registers zeigt die aktuellen Werte der Prozessorregister wie SP, LR, PC und xPSR an.
+   --> bt gibt den Backtrace der aktuellen Funktionsaufrufe vom aktuellen Frame bis zum Einstiegspunkt aus.
+   --> watch legt einen Watchpoint an, der die Ausführung anhält, wenn eine Variable oder Speicheradresse gelesen oder geschrieben wird.
 
 Committen Sie Ihre Änderungen an `main.cpp` sowie Ihr Fazit (z. B. als `FAZIT.md`).
 

@@ -34,6 +34,9 @@ __attribute__((noinline)) int stackDemo(int depth, int maxDepth)
     return local;
 }
 
+#include <cstdlib>
+volatile void* g_heap_ptr;   // landet in .bss
+
 namespace {
 
 constexpr uint32_t kLedPort = GPIOA;
@@ -221,6 +224,7 @@ extern "C" int main()
     uart_write("STM32F103RB startup OK\r\n");
     print_memory_layout();
     heap_demo();
+    g_heap_ptr = std::malloc(32);
 
     g_stack_result = stackDemo(0, 5);
 
